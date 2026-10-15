@@ -1,5 +1,10 @@
-# === Output hasil generate (jangan commit) ===
-output/
+
+# tapi runtime_c sumber tetap ter-commit
+!runtime_c/
+!runtime_c/**
+# kalau output/runtime_c di-copy, tetap ignore output lainnya
+!output/runtime_c/
+!output/runtime_c/**
 imported.json
 imported_model.json
 examples/imported_model.json
