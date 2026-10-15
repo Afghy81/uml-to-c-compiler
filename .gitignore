@@ -1,0 +1,44 @@
+# === Output hasil generate (jangan commit) ===
+output/
+imported.json
+imported_model.json
+examples/imported_model.json
+examples/ubah_vm*.json
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === C build ===
+*.o
+*.obj
+*.exe
+*.out
+*.elf
+*.hex
+*.map
+
+# === OS / Editor ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === Logs / temp ===
+*.log
+scratch_out/
+_scratch/

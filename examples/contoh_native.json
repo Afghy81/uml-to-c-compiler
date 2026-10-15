@@ -1,0 +1,73 @@
+{
+    "name": "SistemSaya",
+    "classes": [
+        {
+            "name": "NamaKelas",
+            "attributes": [
+                {
+                    "name": "id",
+                    "type": "int",
+                    "is_id": true
+                },
+                {
+                    "name": "status",
+                    "type": "string",
+                    "default": "\"idle\""
+                }
+            ],
+            "operations": [
+                {
+                    "name": "start",
+                    "return_type": "void"
+                }
+            ]
+        },
+        {
+            "name": "Door",
+            "is_active": true,
+            "attributes": [
+                {
+                    "name": "is_locked",
+                    "type": "bool",
+                    "default": "false"
+                }
+            ],
+            "state_machine": {
+                "events": [
+                    {
+                        "name": "open",
+                        "id": 1
+                    },
+                    {
+                        "name": "close",
+                        "id": 2
+                    }
+                ],
+                "states": [
+                    {
+                        "name": "Closed",
+                        "id": 0,
+                        "is_initial": true
+                    },
+                    {
+                        "name": "Open",
+                        "id": 1
+                    }
+                ],
+                "transitions": [
+                    {
+                        "from": "Closed",
+                        "to": "Open",
+                        "event": "open"
+                    },
+                    {
+                        "from": "Open",
+                        "to": "Closed",
+                        "event": "close"
+                    }
+                ]
+            }
+        }
+    ],
+    "relationships": []
+}

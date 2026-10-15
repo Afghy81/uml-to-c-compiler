@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>xtUML to C Compiler</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <span class="logo-icon">⚡</span>
+            <span class="logo-text">xtUML Compiler</span>
+        </div>
+        <div class="actions">
+            <button id="openJsonBtn" class="btn btn-secondary">
+                📁 Open JSON
+            </button>
+            <button id="compileBtn" class="btn btn-primary">
+                ▶ Compile / Translate
+            </button>
+            <button id="downloadBtn" class="btn btn-secondary">
+                💾 Download C Code
+            </button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">MODEL INPUT (JSON)</span>
+                <div class="panel-actions">
+                    <button class="icon-btn" id="formatJsonBtn" title="Format JSON">
+                        ✨
+                    </button>
+                    <button class="icon-btn" id="clearJsonBtn" title="Clear">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+            <div class="editor-wrapper">
+                <div class="line-numbers" id="jsonLineNumbers"></div>
+                <textarea id="jsonEditor" class="editor" spellcheck="false"></textarea>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-title">C OUTPUT</span>
+                <div class="panel-actions">
+                    <select id="outputFileSelect" class="file-select">
+                        <option value="header">Door.h</option>
+                        <option value="source">Door.c</option>
+                        <option value="main">main.c</option>
+                    </select>
+                    <button class="icon-btn" id="copyOutputBtn" title="Copy">
+                        📋
+                    </button>
+                    <button class="icon-btn" id="clearOutputBtn" title="Clear output">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+            <div class="editor-wrapper">
+                <div class="line-numbers" id="outputLineNumbers"></div>
+                <textarea id="outputEditor" class="editor" readonly spellcheck="false"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <span id="statusText">Ready</span>
+        <span id="statusInfo"></span>
+    </div>
+
+    <input type="file" id="fileInput" accept=".json,.xtuml" multiple style="display: none;">
+
+    <script src="xtuml_parser.js"></script>
+    <script src="compiler.js"></script>
+    <script src="tests.js"></script>
+    <script src="app.js"></script>
+    <script src="test-runner.js"></script>
+</body>
+</html>

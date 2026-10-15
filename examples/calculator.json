@@ -1,0 +1,22 @@
+{
+  "name": "CalculatorSystem",
+  "classes": [
+    {
+      "name": "Calculator",
+      "attributes": [
+        {"name": "result", "type": "float", "default": "0"},
+        {"name": "memory", "type": "float", "default": "0"}
+      ],
+      "operations": [
+        {"name": "add", "return_type": "float", "parameters": [{"name": "a", "type": "float"}, {"name": "b", "type": "float"}], "body": "return a + b"},
+        {"name": "sub", "return_type": "float", "parameters": [{"name": "a", "type": "float"}, {"name": "b", "type": "float"}], "body": "return a - b"},
+        {"name": "mul", "return_type": "float", "parameters": [{"name": "a", "type": "float"}, {"name": "b", "type": "float"}], "body": "return a * b"},
+        {"name": "div", "return_type": "float", "parameters": [{"name": "a", "type": "float"}, {"name": "b", "type": "float"}], "body": "return (b == 0) ? 0 : a / b"},
+        {"name": "clear", "return_type": "void", "body": "self->result = 0\nself->memory = 0"},
+        {"name": "store", "return_type": "void", "parameters": [{"name": "value", "type": "float"}], "body": "self->memory = value"},
+        {"name": "recall", "return_type": "float", "body": "return self->memory"}
+      ]
+    }
+  ],
+  "relationships": []
+}

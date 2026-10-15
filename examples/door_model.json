@@ -1,0 +1,94 @@
+{
+  "name": "DoorSystem",
+  "classes": [
+    {
+      "name": "Door",
+      "is_active": true,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "int",
+          "is_id": true
+        },
+        {
+          "name": "is_locked",
+          "type": "bool",
+          "default": "false"
+        }
+      ],
+      "operations": [
+        {
+          "name": "lock",
+          "return_type": "void",
+          "body": "self.is_locked = true"
+        },
+        {
+          "name": "unlock",
+          "return_type": "void",
+          "body": "self.is_locked = false"
+        }
+      ],
+      "state_machine": {
+        "events": [
+          {
+            "name": "open",
+            "id": 1
+          },
+          {
+            "name": "close",
+            "id": 2
+          },
+          {
+            "name": "lock",
+            "id": 3
+          },
+          {
+            "name": "unlock",
+            "id": 4
+          }
+        ],
+        "states": [
+          {
+            "name": "Closed",
+            "id": 0,
+            "is_initial": true,
+            "entry": "// Door closed"
+          },
+          {
+            "name": "Open",
+            "id": 1,
+            "entry": "// Door opened"
+          },
+          {
+            "name": "Locked",
+            "id": 2,
+            "entry": "self.is_locked = true"
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Closed",
+            "to": "Open",
+            "event": "open"
+          },
+          {
+            "from": "Open",
+            "to": "Closed",
+            "event": "close"
+          },
+          {
+            "from": "Closed",
+            "to": "Locked",
+            "event": "lock"
+          },
+          {
+            "from": "Locked",
+            "to": "Closed",
+            "event": "unlock"
+          }
+        ]
+      }
+    }
+  ],
+  "relationships": []
+}
