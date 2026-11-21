@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>xtUML to C Compiler</title>
+    <title>xtUML to C Compiler — 3-Stage Interactive MDA Workspace</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,6 +11,9 @@
         <div class="logo">
             <span class="logo-icon">⚡</span>
             <span class="logo-text">xtUML Compiler</span>
+            <span class="sync-pill" id="syncBadge" title="Single Source of Truth: canonicalXtUmlJson">
+                ● Synced: Visual ↔ Parsing ↔ Translasi
+            </span>
         </div>
         <div class="actions">
             <button id="openJsonBtn" class="btn btn-secondary">
@@ -26,32 +29,186 @@
     </div>
 
     <div class="container">
-        <div class="panel">
-            <div class="panel-header">
-                <span class="panel-title">MODEL INPUT (JSON)</span>
+        <!-- LEFT PANEL: 3-Mode Interactive Workspace (1. Visual | 2. Parsing | 3. Translasi) -->
+        <div class="panel left-workspace-panel">
+            <div class="panel-header left-panel-header">
+                <div class="mode-tabs" role="tablist" aria-label="3-Stage Compiler Pipeline Tabs">
+                    <button class="mode-tab active" id="tabBtnVisual" data-tab="visual" role="tab" aria-selected="true">
+                        <span class="tab-num">1.</span> Visual
+                    </button>
+                    <button class="mode-tab" id="tabBtnParsing" data-tab="parsing" role="tab" aria-selected="false">
+                        <span class="tab-num">2.</span> Parsing
+                    </button>
+                    <button class="mode-tab" id="tabBtnTranslasi" data-tab="translasi" role="tab" aria-selected="false">
+                        <span class="tab-num">3.</span> Translasi UML
+                    </button>
+                </div>
                 <div class="panel-actions">
-                    <button class="icon-btn" id="formatJsonBtn" title="Format JSON">
+                    <button class="preset-btn" id="loadSensorPresetBtn" title="Muat Model Uji Sensor (float suhu, bacaData())">
+                        🌡️ Preset: Sensor
+                    </button>
+                    <button class="preset-btn" id="loadDoorPresetBtn" title="Muat Model Uji Door FSM">
+                        🚪 Preset: Door
+                    </button>
+                    <button class="icon-btn" id="formatJsonBtn" title="Format / Prettify JSON">
                         ✨
                     </button>
-                    <button class="icon-btn" id="clearJsonBtn" title="Clear">
+                    <button class="icon-btn" id="clearJsonBtn" title="Clear Model">
                         🗑️
                     </button>
                 </div>
             </div>
-            <div class="editor-wrapper">
-                <div class="line-numbers" id="jsonLineNumbers"></div>
-                <textarea id="jsonEditor" class="editor" spellcheck="false"></textarea>
+
+            <!-- ==================== TAB 1: 1. VISUAL ==================== -->
+            <div class="tab-pane active" id="tabVisual" role="tabpanel">
+                <div class="sub-toolbar">
+                    <div class="sub-view-group">
+                        <button class="sub-view-btn active" data-subview="class" id="subViewClassBtn">
+                            📦 Class Diagram
+                        </button>
+                        <button class="sub-view-btn" data-subview="state" id="subViewStateBtn">
+                            🔄 State Diagram
+                        </button>
+                        <button class="sub-view-btn" data-subview="action" id="subViewActionBtn">
+                            ⚡ Action (OAL) Diagram
+                        </button>
+                    </div>
+                    <div class="visual-builder-actions">
+                        <button class="mini-btn mini-btn-accent" id="toggleAddClassFormBtn">
+                            + Tambah Class
+                        </button>
+                        <button class="mini-btn" id="toggleAddRelFormBtn">
+                            + Relasi (R1..Rn)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Inline Form: Add New Class -->
+                <div class="inline-builder-form hidden" id="addClassForm">
+                    <div class="form-row">
+                        <label>Nama Class:</label>
+                        <input type="text" id="newClassName" placeholder="contoh: Sensor" class="form-input">
+                        <label>Key Letters (KL):</label>
+                        <input type="text" id="newClassKL" placeholder="SEN" class="form-input form-input-sm">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="newClassActive"> Active (FSM)
+                        </label>
+                        <button class="mini-btn mini-btn-primary" id="confirmAddClassBtn">Simpan Class</button>
+                        <button class="mini-btn" id="cancelAddClassBtn">Batal</button>
+                    </div>
+                </div>
+
+                <!-- Inline Form: Add Relationship -->
+                <div class="inline-builder-form hidden" id="addRelForm">
+                    <div class="form-row">
+                        <label>ID Relasi:</label>
+                        <input type="text" id="newRelName" placeholder="R1" value="R1" class="form-input form-input-sm">
+                        <label>Source:</label>
+                        <select id="newRelSource" class="form-select"></select>
+                        <label>Target:</label>
+                        <select id="newRelTarget" class="form-select"></select>
+                        <label>Role Pointer:</label>
+                        <input type="text" id="newRelRole" placeholder="controller" class="form-input form-input-sm">
+                        <button class="mini-btn mini-btn-primary" id="confirmAddRelBtn">Tambah Relasi</button>
+                        <button class="mini-btn" id="cancelAddRelBtn">Batal</button>
+                    </div>
+                </div>
+
+                <div class="visual-workspace" id="visualWorkspace">
+                    <!-- Subview 1: Interactive Class Diagram Builder + SVG Blueprint -->
+                    <div class="visual-subview active" id="visualSubviewClass">
+                        <div class="svg-diagram-container" id="svgDiagramContainer"></div>
+                        <div class="section-divider">
+                            <span>INTERACTIVE CLASS &amp; MEMBER EDITOR (Klik untuk tambah/ubah Atribut &amp; Metode)</span>
+                        </div>
+                        <div class="class-cards-grid" id="classCardsGrid"></div>
+                        <div class="relationships-bar" id="relationshipsBar"></div>
+                    </div>
+
+                    <!-- Subview 2: xtUML State Machine Diagram -->
+                    <div class="visual-subview" id="visualSubviewState">
+                        <div class="state-diagram-canvas" id="stateDiagramCanvas"></div>
+                    </div>
+
+                    <!-- Subview 3: xtUML Action (OAL) Control-Flow Diagram -->
+                    <div class="visual-subview" id="visualSubviewAction">
+                        <div class="action-diagram-canvas" id="actionDiagramCanvas"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== TAB 2: 2. PARSING ==================== -->
+            <div class="tab-pane" id="tabParsing" role="tabpanel">
+                <div class="sub-toolbar">
+                    <div class="sub-toolbar-title">
+                        <span>🔍 XML / XMI SYNTACTIC &amp; SEMANTIC PARSER</span>
+                    </div>
+                    <div class="visual-builder-actions">
+                        <button class="mini-btn" id="uploadXmlBtn" title="Upload file .xml / .xmi">
+                            📂 Upload XML/XMI
+                        </button>
+                        <button class="mini-btn" id="loadSensorXmlBtn" title="Muat contoh XML Diagram Sensor">
+                            📄 Contoh XML: Sensor
+                        </button>
+                        <button class="mini-btn mini-btn-primary" id="parseXmlBtn" title="Analisis XML/XMI dan sinkronkan ke Visual & JSON">
+                            ▶ Parse XML &amp; Sync
+                        </button>
+                    </div>
+                </div>
+
+                <div class="parsing-split-container">
+                    <!-- Top: Raw XML / XMI Input -->
+                    <div class="xml-input-section">
+                        <div class="mini-section-header">
+                            <span>RAW DIAGRAM XML / XMI INPUT</span>
+                            <span class="hint-text">Mendukung OMG UML XMI 2.x (&lt;uml:Class&gt;, &lt;ownedAttribute&gt;, &lt;ownedOperation&gt;) &amp; Simple XML</span>
+                        </div>
+                        <div class="editor-wrapper xml-editor-wrapper">
+                            <div class="line-numbers" id="xmlLineNumbers">1</div>
+                            <textarea id="xmlEditor" class="editor" spellcheck="false" placeholder="Paste kode XML atau XMI diagram UML di sini..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Bottom: Semantic Inspector & Entity Tagging Output -->
+                    <div class="parsing-inspector-section">
+                        <div class="mini-section-header">
+                            <span>HASIL ANALISIS SINTAKSIS &amp; IDENTIFIKASI ENTITAS (IR / AST TAGGING)</span>
+                            <span id="parsingStatusBadge" class="badge badge-success">✓ Valid Schema</span>
+                        </div>
+                        <div class="parsing-results-body" id="parsingResultsBody">
+                            <div class="identification-logs" id="parsingIdentificationLogs"></div>
+                            <div class="ast-entity-table-wrapper" id="parsingAstTable"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== TAB 3: 3. TRANSLASI ==================== -->
+            <div class="tab-pane" id="tabTranslasi" role="tabpanel">
+                <div class="sub-toolbar">
+                    <div class="sub-toolbar-title">
+                        <span>⚙️ CANONICAL XTUML MODEL (.JSON) — READY FOR C TRANSLATION</span>
+                    </div>
+                    <div class="visual-builder-actions">
+                        <span class="mapping-hint">Class → typedef struct | Attr → field | Method → Fn(Class* self)</span>
+                    </div>
+                </div>
+                <div class="editor-wrapper">
+                    <div class="line-numbers" id="jsonLineNumbers"></div>
+                    <textarea id="jsonEditor" class="editor" spellcheck="false"></textarea>
+                </div>
             </div>
         </div>
 
+        <!-- RIGHT PANEL: C OUTPUT (Unchanged layout & controls) -->
         <div class="panel">
             <div class="panel-header">
                 <span class="panel-title">C OUTPUT</span>
                 <div class="panel-actions">
                     <select id="outputFileSelect" class="file-select">
-                        <option value="header">Door.h</option>
-                        <option value="source">Door.c</option>
-                        <option value="main">main.c</option>
+                        <option value="Sensor.h">Sensor.h</option>
+                        <option value="Sensor.c">Sensor.c</option>
+                        <option value="main.c">main.c</option>
                     </select>
                     <button class="icon-btn" id="copyOutputBtn" title="Copy">
                         📋
@@ -70,10 +227,11 @@
 
     <div class="status-bar">
         <span id="statusText">Ready</span>
-        <span id="statusInfo"></span>
+        <span id="statusInfo">Mode: 1. Visual | Canonical Model Synced</span>
     </div>
 
-    <input type="file" id="fileInput" accept=".json,.xtuml" multiple style="display: none;">
+    <input type="file" id="fileInput" accept=".json,.xtuml,.xml,.xmi" multiple style="display: none;">
+    <input type="file" id="xmlFileInput" accept=".xml,.xmi" style="display: none;">
 
     <script src="xtuml_parser.js"></script>
     <script src="compiler.js"></script>
