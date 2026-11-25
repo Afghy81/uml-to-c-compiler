@@ -1,0 +1,25 @@
+stateDiagram-v2
+    %% State Machine for Sensor (KL: SEN)
+    [*] --> Sensor_Idle : Sensor_init(&self)
+    state "@state_num(1) Sensor::Idle" as Sensor_Idle
+    Sensor_Idle : entry /
+    Sensor_Idle : self.suhu = 0.0f;
+    state "@state_num(2) Sensor::Sampling" as Sensor_Sampling
+    Sensor_Sampling : entry /
+    Sensor_Sampling : self.bacaData();
+    Sensor_Sampling : select one ctrl related by self->CTL[R1];
+    Sensor_Sampling : if (not_empty ctrl)
+    Sensor_Sampling : if (self.suhu > ctrl.batas_suhu)
+    Sensor_Sampling : generate SEN3 :: Overheat() to self;
+    Sensor_Sampling : end if;
+    Sensor_Sampling : end if;
+    state "@state_num(3) Sensor::OverheatAlert" as Sensor_OverheatAlert
+    Sensor_OverheatAlert : entry /
+    Sensor_OverheatAlert : select one ctrl related by self->CTL[R1];
+    Sensor_OverheatAlert : if (not_empty ctrl)
+    Sensor_OverheatAlert : ctrl.alarm_aktif = true;
+    Sensor_OverheatAlert : end if;
+    Sensor_Idle --> Sensor_Sampling : SEN1_StartSampling
+    Sensor_Sampling --> Sensor_Idle : SEN2_SampleOK
+    Sensor_Sampling --> Sensor_OverheatAlert : SEN3_Overheat
+    Sensor_OverheatAlert --> Sensor_Idle : SEN4_Reset

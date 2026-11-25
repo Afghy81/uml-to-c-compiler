@@ -1,0 +1,17 @@
+digraph "SmartThermalMonitor_StateMachines" {
+    rankdir=TB;
+    node [shape=Mrecord, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    subgraph "cluster_Sensor" {
+        label="State Machine: Sensor (KL: SEN)";
+        "Sensor__init" [shape=point, width=0.2];
+        "Sensor__init" -> "Sensor_Idle" [label="Sensor_init"];
+        "Sensor_Idle" [label="{@state_num(1) Idle|entry /\lself.suhu = 0.0f;\l}"];
+        "Sensor_Sampling" [label="{@state_num(2) Sampling|entry /\lself.bacaData();\lselect one ctrl related by self->CTL[R1];\lif (not_empty ctrl)\lif (self.suhu > ctrl.batas_suhu)\l}"];
+        "Sensor_OverheatAlert" [label="{@state_num(3) OverheatAlert|entry /\lselect one ctrl related by self->CTL[R1];\lif (not_empty ctrl)\lctrl.alarm_aktif = true;\lend if;\l}"];
+        "Sensor_Idle" -> "Sensor_Sampling" [label="StartSampling"];
+        "Sensor_Sampling" -> "Sensor_Idle" [label="SampleOK"];
+        "Sensor_Sampling" -> "Sensor_OverheatAlert" [label="Overheat"];
+        "Sensor_OverheatAlert" -> "Sensor_Idle" [label="Reset"];
+    }
+}

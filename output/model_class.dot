@@ -1,0 +1,8 @@
+digraph "SmartThermalMonitor_ClassDiagram" {
+    rankdir=LR;
+    node [shape=record, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    "Controller" [label="{Controller [KL: CTL]|+ batas_suhu : float\l+ alarm_aktif : bool\l|+ Controller_init(self : Controller*) : void\l+ cekAmbangBatas(suhu_ukur:float) : bool\l}"];
+    "Sensor" [label="{Sensor [KL: SEN]|- suhu : float\l- controller : Controller*\l|+ Sensor_init(self : Sensor*) : void\l+ bacaData() : void\l}"];
+    "Sensor" -> "Controller" [label="R1 (controller) [0..*..1]"];
+}

@@ -39,6 +39,8 @@ typedef struct {
     uint16_t length;
 } uml_string_t;
 
+typedef uml_string_t UMLString;
+
 /* --------------------------------------------------------------------------
  * Header Instans Universal (disematkan di awal setiap struct kelas)
  * -------------------------------------------------------------------------- */
@@ -61,6 +63,8 @@ static inline void uml_string_set(uml_string_t* s, const char* src) {
     s->data[i] = '\0';
     s->length = (uint16_t)i;
 }
+
+#define umlstring_set uml_string_set
 
 static inline const char* uml_string_get(const uml_string_t* s) {
     if (s == NULL) return "";

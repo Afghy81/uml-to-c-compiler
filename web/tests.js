@@ -1,4 +1,4 @@
-// Integration Tests for UML-to-C Compiler Web Interface
+// Integration Tests for UML-to-C Compiler Web Interface (3-Stage Interactive Workspace)
 class CompilerTests {
     constructor() {
         this.compiler = new UMLToC();
@@ -251,6 +251,84 @@ class CompilerTests {
         this.assert(result.files["Door.c"].includes("DOOR_STATE_CLOSED"), "Initial state set in constructor");
     }
 
+    // Test 16: End-to-End Sensor XML Parsing -> Identification Log -> JSON Sync -> C Translation
+    testSensorXmlToJsonToCPipeline() {
+        const sensorXml = `<?xml version="1.0" encoding="UTF-8"?>
+        <uml:Model xmlns:xmi="http://www.omg.org/XMI" xmlns:uml="http://www.eclipse.org/uml2/5.0.0/UML" name="ThermalModel">
+            <packagedElement xmi:type="uml:Class" xmi:id="cls_sensor" name="Sensor" key_letters="SEN">
+                <ownedAttribute xmi:type="uml:Property" name="suhu" type="float" visibility="private" defaultValue="0.0f"/>
+                <ownedOperation xmi:type="uml:Operation" name="bacaData" returnType="void" visibility="public" body="self.suhu = 27.5f"/>
+            </packagedElement>
+        </uml:Model>`;
+
+        const parseFn = typeof parseXmlOrXmiToModel === 'function'
+            ? parseXmlOrXmiToModel
+            : (window && window.parseXmlOrXmiToModel);
+        const parsed = parseFn(sensorXml);
+
+        this.assert(parsed.success === true, "Sensor XML/XMI parsed successfully");
+        this.assert(
+            parsed.logs.some(l => l.text.includes("Teridentifikasi Class: Sensor — memiliki atribut `suhu` (tipe: `float`) dan metode `bacaData()`")),
+            "Parser identifies Sensor class, attribute suhu (float), and method bacaData()"
+        );
+
+        const cRes = this.compiler.compile(JSON.stringify(parsed.model));
+        this.assert(cRes.success === true, "Synced Sensor JSON compiled to C");
+        this.assert(cRes.files["Sensor.h"].includes("float suhu;"), "Sensor.h contains float suhu;");
+        this.assert(cRes.files["Sensor.h"].includes("void Sensor_bacaData(Sensor_t* self);"), "Sensor.h contains Sensor_bacaData(Sensor_t* self)");
+        this.assert(cRes.files["Sensor.c"].includes("self->suhu = 27.5f;"), "Sensor.c contains translated method body");
+    }
+
+    // Test 17: Preserve Original xtUML Input, Ctrl+Wheel Zoom, and Trash/Bin Reset
+    testPreserveInputZoomAndReset() {
+        const originalXtumlEnvelope = '{\n  "type": "subsystem",\n  "sub_id": "vm1",\n  "sub_name": "vending_machine_qris",\n  "model": [\n    {\n      "type": "class",\n      "class_id": "1",\n      "class_name": "Product",\n      "KL": "PRD",\n      "attributes": [\n        { "attribute_type": "naming_attribute", "attribute_name": "productCode", "data_type": "string" }\n      ],\n      "operations": ["checkStock()"],\n      "states": []\n    }\n  ]\n}';
+        const res = this.compiler.compile(originalXtumlEnvelope);
+        this.assert(res.success === true, "Original xtUML VM envelope compiles directly");
+        this.assert(res.files["Product.h"] !== undefined, "Product.h generated from xtUML VM envelope");
+
+        // Verify DOM-level preservation, zoom, and reset if running in browser DOM
+        if (typeof document !== 'undefined' && document.getElementById) {
+            const jEd = document.getElementById('jsonEditor');
+            const jLn = document.getElementById('jsonLineNumbers');
+            const oEd = document.getElementById('outputEditor');
+            const oLn = document.getElementById('outputLineNumbers');
+            const clrBtn = document.getElementById('clearJsonBtn');
+            if (jEd && oEd && typeof window.zoomEditorFontSize === 'function') {
+                const prevText = jEd.value;
+                const prevModel = window.canonicalXtUmlJson
+                    ? JSON.parse(JSON.stringify(window.canonicalXtUmlJson))
+                    : null;
+
+                jEd.value = originalXtumlEnvelope;
+                if (typeof syncCanonicalState === 'function') {
+                    syncCanonicalState(res.model, 'compile-btn', false);
+                }
+                this.assert(jEd.value === originalXtumlEnvelope, "Original xtUML input preserved verbatim after compilation");
+
+                const z1 = window.zoomEditorFontSize(jEd, jLn, -100, false);
+                const z2 = window.zoomEditorFontSize(oEd, oLn, -100, false);
+                this.assert(z1 === 15 && jEd.style.fontSize === '15px', "Left editor Ctrl+Wheel zoom in updates font size");
+                this.assert(z2 === 15 && oEd.style.fontSize === '15px', "Right editor Ctrl+Wheel zoom in updates font size");
+                window.zoomEditorFontSize(jEd, jLn, 0, true);
+                window.zoomEditorFontSize(oEd, oLn, 0, true);
+
+                if (clrBtn && typeof window.resetLeftPanelInputs === 'function') {
+                    window.resetLeftPanelInputs();
+                    this.assert(jEd.value === '', "Trash button clears left input editor");
+                }
+
+                // Restore user's state after test finishes
+                if (prevModel && typeof syncCanonicalState === 'function') {
+                    syncCanonicalState(prevModel, 'init', true);
+                }
+                if (prevText) {
+                    jEd.value = prevText;
+                    if (typeof updateLineNumbers === 'function') updateLineNumbers(jEd, jLn);
+                }
+            }
+        }
+    }
+
     // Run all tests
     runAll() {
         console.log("=== Running UML-to-C Compiler Tests ===\n");
@@ -270,6 +348,8 @@ class CompilerTests {
         this.testFSMTransitions();
         this.testOALTranslation();
         this.testInitialState();
+        this.testSensorXmlToJsonToCPipeline();
+        this.testPreserveInputZoomAndReset();
         
         console.log("\n=== Test Results ===");
         console.log(`Passed: ${this.passed}`);

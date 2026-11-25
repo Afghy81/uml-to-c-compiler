@@ -1,0 +1,17 @@
+classDiagram
+    class Controller {
+        <<Class | KL: CTL>>
+        +float batas_suhu
+        +bool alarm_aktif
+        +Controller_init(Controller* self) void
+        +cekAmbangBatas(float suhu_ukur) bool
+    }
+    class Sensor {
+        <<Active Class | KL: SEN>>
+        -float suhu
+        -Controller* controller
+        +Sensor_init(Sensor* self) void
+        +bacaData() void
+        +Sensor_dispatch_event(Sensor* self, Sensor_Event evt) void
+    }
+    Sensor "0..*" --> "1" Controller : R1 (controller)

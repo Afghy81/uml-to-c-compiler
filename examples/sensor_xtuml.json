@@ -1,0 +1,102 @@
+{
+  "name": "SmartThermalMonitor",
+  "classes": [
+    {
+      "name": "Controller",
+      "key_letters": "CTL",
+      "is_active": false,
+      "attributes": [
+        {
+          "name": "batas_suhu",
+          "type": "float",
+          "visibility": "public",
+          "default_value": "30.0f"
+        },
+        {
+          "name": "alarm_aktif",
+          "type": "bool",
+          "visibility": "public",
+          "default_value": "false"
+        }
+      ],
+      "operations": [
+        {
+          "name": "cekAmbangBatas",
+          "return_type": "bool",
+          "visibility": "public",
+          "parameters": [
+            { "name": "suhu_ukur", "type": "float" }
+          ],
+          "body": "self.alarm_aktif = (suhu_ukur > self.batas_suhu);\nreturn self.alarm_aktif;"
+        }
+      ]
+    },
+    {
+      "name": "Sensor",
+      "key_letters": "SEN",
+      "is_active": true,
+      "attributes": [
+        {
+          "name": "suhu",
+          "type": "float",
+          "visibility": "private",
+          "default_value": "0.0f"
+        }
+      ],
+      "operations": [
+        {
+          "name": "bacaData",
+          "return_type": "void",
+          "visibility": "public",
+          "parameters": [],
+          "body": "self.suhu = 27.5f;"
+        }
+      ],
+      "state_machine": {
+        "events": [
+          { "name": "StartSampling", "id": 1 },
+          { "name": "SampleOK", "id": 2 },
+          { "name": "Overheat", "id": 3 },
+          { "name": "Reset", "id": 4 }
+        ],
+        "states": [
+          {
+            "name": "Idle",
+            "id": 0,
+            "is_initial": true,
+            "entry_action": "self.suhu = 0.0f;"
+          },
+          {
+            "name": "Sampling",
+            "id": 1,
+            "is_initial": false,
+            "entry_action": "self.bacaData();\nselect one ctrl related by self->CTL[R1];\nif (not_empty ctrl)\n  if (self.suhu > ctrl.batas_suhu)\n    generate SEN3:Overheat() to self;\n  end if;\nend if;"
+          },
+          {
+            "name": "OverheatAlert",
+            "id": 2,
+            "is_initial": false,
+            "entry_action": "select one ctrl related by self->CTL[R1];\nif (not_empty ctrl)\n  ctrl.alarm_aktif = true;\nend if;"
+          }
+        ],
+        "transitions": [
+          { "from": "Idle", "to": "Sampling", "event": "StartSampling" },
+          { "from": "Sampling", "to": "Idle", "event": "SampleOK" },
+          { "from": "Sampling", "to": "OverheatAlert", "event": "Overheat" },
+          { "from": "OverheatAlert", "to": "Idle", "event": "Reset" }
+        ]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "name": "R1",
+      "type": "association",
+      "source": "Sensor",
+      "target": "Controller",
+      "source_multiplicity": "0..*",
+      "target_multiplicity": "1",
+      "target_role": "controller"
+    }
+  ]
+}

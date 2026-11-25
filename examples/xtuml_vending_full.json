@@ -1,0 +1,351 @@
+{
+  "type": "subsystem",
+  "sub_id": "vm1",
+  "sub_name": "vending_machine_qris",
+  "enumerations": [
+    {
+      "name": "MachineState",
+      "values": ["Idle", "CheckStock", "PaymentInitiated", "WaitingPayment", "Dispensing", "OutOfStock", "Error"]
+    },
+    {
+      "name": "PaymentStatus",
+      "values": ["Waiting", "Pending", "Completed", "Failed", "Canceled"]
+    }
+  ],
+  "model": [
+    {
+      "type": "class",
+      "class_id": "1",
+      "class_name": "Product",
+      "KL": "PRD",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "productCode", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "name", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "price", "data_type": "real" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "stock", "data_type": "integer" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "minStockThreshold", "data_type": "integer", "default_value": 2 },
+        { "attribute_type": "referential_attribute", "attribute_name": "R6_inventoryService", "data_type": "inst_ref<InventoryService>", "relationship_id": "R6" },
+        { "attribute_type": "referential_attribute", "attribute_name": "R10_fallbackProduct", "data_type": "inst_ref<Product>", "relationship_id": "R10" }
+      ],
+      "operations": [
+        "checkStock(): boolean",
+        "reduceStock(quantity: integer): void"
+      ],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "2",
+      "class_name": "VendingMachine",
+      "KL": "VM",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "machineId", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "currentState", "data_type": "MachineState", "default_value": "Idle" },
+        { "attribute_type": "referential_attribute", "attribute_name": "R1_selectedProduct", "data_type": "inst_ref<Product>", "relationship_id": "R1" },
+        { "attribute_type": "referential_attribute", "attribute_name": "R2_userInterface", "data_type": "inst_ref<UserInterface>", "relationship_id": "R2" },
+        { "attribute_type": "referential_attribute", "attribute_name": "R3_transaction", "data_type": "inst_ref<Transaction>", "relationship_id": "R3" },
+        { "attribute_type": "referential_attribute", "attribute_name": "R7_dispenser", "data_type": "inst_ref<Dispenser>", "relationship_id": "R7" }
+      ],
+      "operations": [
+        "handleSelection(p_productCode: string): boolean",
+        "initiatePayment(): boolean",
+        "verifyPayment(): boolean",
+        "dispenseItem(): void",
+        "cancelOrder(): void",
+        "handleError(): void"
+      ],
+      "states": [
+        {
+          "state_id": "1",
+          "state_name": "Idle",
+          "state_event": ["ProductSelected"],
+          "next_state": "CheckStock",
+          "action": "select any p from instances of PRD where (selected.productCode == rcvd_evt.p_productCode);\nif (not_empty p)\n relate self to p across R1;\nend if;"
+        },
+        {
+          "state_id": "2",
+          "state_name": "CheckStock",
+          "state_event": ["StockEmpty"],
+          "next_state": "OutOfStock",
+          "action": "select one p related by self->PRD[R1];\nif (p.stock > 0)\n generate VM3:PaymentInitiated() to self;\nelse\n generate VM2:StockEmpty() to self;\nend if;"
+        },
+        {
+          "state_id": "3",
+          "state_name": "PaymentInitiated",
+          "state_event": ["PaymentInitiated"],
+          "next_state": "WaitingPayment",
+          "action": "create object instance t of TXN;\nassign t.amount = p.price;\nrelate self to t across R3;\nPS::createQR(t_instance:t);\nui.showQR();"
+        },
+        {
+          "state_id": "4",
+          "state_name": "WaitingPayment",
+          "state_event": ["PaymentSuccess"],
+          "next_state": "Dispensing",
+          "action": "select one t related by self->TXN[R3];\nassign t.status = \"Completed\";\nDSP::activateMotor();\ngenerate VM6:ItemDispensed() to self;"
+        },
+        {
+          "state_id": "5",
+          "state_name": "WaitingPayment_Failed",
+          "state_event": ["PaymentFailed"],
+          "next_state": "Error",
+          "action": "ui.showError(error_msg:\"Payment failed\");\nunrelate self from t across R3;\ndelete object instance t;\ngenerate VM7:Reset() to self;"
+        },
+        {
+          "state_id": "6",
+          "state_name": "Dispensing",
+          "state_event": ["ItemDispensed"],
+          "next_state": "Idle",
+          "action": "assign p.stock = p.stock - 1;\nIS::updateStock(productCode: p.productCode, newStock: p.stock);\nui.showMessage(message:\"Item dispensed\");\nunrelate self from p across R1;"
+        },
+        {
+          "state_id": "7",
+          "state_name": "OutOfStock",
+          "state_event": ["Reset"],
+          "next_state": "Idle",
+          "action": "ui.showMessage(message:\"Out of stock. Select another item.\");\nunrelate self from self->PRD[R1] across R1;"
+        },
+        {
+          "state_id": "8",
+          "state_name": "Error",
+          "state_event": ["Reset"],
+          "next_state": "Idle",
+          "action": "ui.showMessage(message:\"Initializing system. Ready.\");\nunrelate self from self->PRD[R1] across R1;\nunrelate self from self->TXN[R3] across R3;"
+        }
+      ]
+    },
+    {
+      "type": "class",
+      "class_id": "3",
+      "class_name": "UserInterface",
+      "KL": "UI",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "uiId", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "displayStatus", "data_type": "string" }
+      ],
+      "operations": [
+        "displayScreen(): void",
+        "receiveInput(): string",
+        "showQR(): void",
+        "showMessage(message: string): void",
+        "showError(error_msg: string): void"
+      ],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "4",
+      "class_name": "Transaction",
+      "KL": "TXN",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "transactionId", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "amount", "data_type": "real" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "status", "data_type": "PaymentStatus", "default_value": "Pending" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "timestamp", "data_type": "datetime" }
+      ],
+      "operations": ["logTransaction(): void"],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "5",
+      "class_name": "Payment",
+      "KL": "PAY",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "paymentId", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "amount", "data_type": "real" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "status", "data_type": "PaymentStatus", "default_value": "Waiting" }
+      ],
+      "operations": ["validateAmount(): boolean"],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "6",
+      "class_name": "PaymentService",
+      "KL": "PS",
+      "is_external": true,
+      "attributes": [],
+      "operations": [
+        "createQR(t_instance: inst_ref<Transaction>): void",
+        "validatePayment(): boolean"
+      ],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "7",
+      "class_name": "InventoryService",
+      "KL": "IS",
+      "is_external": true,
+      "attributes": [],
+      "operations": [
+        "getStockStatus(): integer",
+        "updateStock(productCode: string, newStock: integer): void"
+      ],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "8",
+      "class_name": "Dispenser",
+      "KL": "DSP",
+      "is_external": true,
+      "attributes": [],
+      "operations": ["activateMotor(): void"],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "9",
+      "class_name": "SalesRecord",
+      "KL": "SR",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "recordId", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "quantitySold", "data_type": "integer" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "unitPriceAtSale", "data_type": "real" }
+      ],
+      "operations": ["computeLineTotal(): real"],
+      "states": []
+    },
+    {
+      "type": "class",
+      "class_id": "10",
+      "class_name": "QRISPayment",
+      "KL": "QRP",
+      "attributes": [
+        { "attribute_type": "naming_attribute", "attribute_name": "paymentId", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "qrisPayload", "data_type": "string" },
+        { "attribute_type": "descriptive_attribute", "attribute_name": "merchantPan", "data_type": "string" }
+      ],
+      "operations": ["generateQRIS(): string", "verifyQRIS(): boolean"],
+      "states": []
+    }
+  ],
+  "relationships": [
+    {
+      "rel_id": "R1",
+      "type": "binary",
+      "from_class": "1",
+      "from_class_role": "is_selected_by",
+      "from_class_multiplicity": "0_star",
+      "to_class": "2",
+      "to_class_role": "selects",
+      "to_class_multiplicity": "0_one",
+      "is_referential": true
+    },
+    {
+      "rel_id": "R2",
+      "type": "binary",
+      "from_class": "2",
+      "from_class_role": "interactsThrough",
+      "from_class_multiplicity": "1",
+      "to_class": "3",
+      "to_class_role": "uses",
+      "to_class_multiplicity": "1"
+    },
+    {
+      "rel_id": "R3",
+      "type": "binary",
+      "from_class": "2",
+      "from_class_role": "records",
+      "from_class_multiplicity": "1",
+      "to_class": "4",
+      "to_class_role": "is_recorded_by",
+      "to_class_multiplicity": "0_star",
+      "is_referential": true
+    },
+    {
+      "rel_id": "R4",
+      "type": "binary",
+      "from_class": "4",
+      "from_class_role": "hasPayment",
+      "from_class_multiplicity": "1",
+      "to_class": "5",
+      "to_class_role": "is_recorded_in",
+      "to_class_multiplicity": "0_one"
+    },
+    {
+      "rel_id": "R5",
+      "type": "binary",
+      "from_class": "5",
+      "from_class_role": "processedBy",
+      "from_class_multiplicity": "0_star",
+      "to_class": "6",
+      "to_class_role": "processes",
+      "to_class_multiplicity": "1"
+    },
+    {
+      "rel_id": "R6",
+      "type": "binary",
+      "from_class": "1",
+      "from_class_role": "managedBy",
+      "from_class_multiplicity": "0_star",
+      "to_class": "7",
+      "to_class_role": "uses",
+      "to_class_multiplicity": "1"
+    },
+    {
+      "rel_id": "R7",
+      "type": "binary",
+      "from_class": "2",
+      "from_class_role": "controls",
+      "from_class_multiplicity": "1",
+      "to_class": "8",
+      "to_class_role": "dispenses_for",
+      "to_class_multiplicity": "1"
+    },
+    {
+      "rel_id": "R8",
+      "type": "associative",
+      "from_class": "1",
+      "from_class_role": "sold_in",
+      "from_class_multiplicity": "1_star",
+      "to_class": "4",
+      "to_class_role": "includes_item",
+      "to_class_multiplicity": "0_star",
+      "association_class": "9"
+    },
+    {
+      "rel_id": "R9",
+      "type": "generalization",
+      "supertype_class_id": "5",
+      "subtype_class_ids": ["10"],
+      "from_class": "10",
+      "to_class": "5",
+      "from_class_role": "is_a",
+      "to_class_role": "generalizes"
+    },
+    {
+      "rel_id": "R10",
+      "type": "binary",
+      "from_class": "1",
+      "from_class_role": "replaces",
+      "from_class_multiplicity": "0_one",
+      "to_class": "1",
+      "to_class_role": "replaced_by",
+      "to_class_multiplicity": "0_one"
+    }
+  ],
+  "events": [
+    { "event_id": "VM1", "class_id": "2", "event_name": "ProductSelected", "parameters": ["p_productCode: string"] },
+    { "event_id": "VM2", "class_id": "2", "event_name": "StockEmpty", "parameters": [] },
+    { "event_id": "VM3", "class_id": "2", "event_name": "PaymentInitiated", "parameters": [] },
+    { "event_id": "VM4", "class_id": "2", "event_name": "PaymentSuccess", "parameters": [] },
+    { "event_id": "VM5", "class_id": "2", "event_name": "PaymentFailed", "parameters": [] },
+    { "event_id": "VM6", "class_id": "2", "event_name": "ItemDispensed", "parameters": [] },
+    { "event_id": "VM7", "class_id": "2", "event_name": "Reset", "parameters": [] }
+  ],
+  "state_transition_table": [
+    { "current_state": "Idle", "event_id": "VM1", "event_name": "ProductSelected", "next_state": "CheckStock" },
+    { "current_state": "CheckStock", "event_id": "VM3", "event_name": "PaymentInitiated", "next_state": "PaymentInitiated" },
+    { "current_state": "CheckStock", "event_id": "VM2", "event_name": "StockEmpty", "next_state": "OutOfStock" },
+    { "current_state": "PaymentInitiated", "event_id": "VM3", "event_name": "PaymentInitiated", "next_state": "WaitingPayment" },
+    { "current_state": "PaymentInitiated", "event_id": "VM7", "event_name": "Reset", "next_state": "Idle" },
+    { "current_state": "WaitingPayment", "event_id": "VM4", "event_name": "PaymentSuccess", "next_state": "Dispensing" },
+    { "current_state": "WaitingPayment", "event_id": "VM5", "event_name": "PaymentFailed", "next_state": "WaitingPayment_Failed" },
+    { "current_state": "WaitingPayment_Failed", "event_id": "VM5", "event_name": "PaymentFailed", "next_state": "Error" },
+    { "current_state": "Dispensing", "event_id": "VM6", "event_name": "ItemDispensed", "next_state": "Idle" },
+    { "current_state": "OutOfStock", "event_id": "VM7", "event_name": "Reset", "next_state": "Idle" },
+    { "current_state": "Error", "event_id": "VM7", "event_name": "Reset", "next_state": "Idle" }
+  ]
+}
