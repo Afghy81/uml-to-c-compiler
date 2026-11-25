@@ -1,93 +1,350 @@
-// UML-to-C Compiler (JS port) — supports native JSON, xtUML VM envelope, BridgePoint .xtuml, and UML XML/XMI 2.x
+// UML-to-C Compiler (JS port) — supports native JSON, xtUML VM envelope (R1..R10, enumerations, state_transition_table), BridgePoint .xtuml, and UML XML/XMI 2.x
 const _TYPE_MAP = { string:'string', integer:'int', int:'int', real:'float', float:'float', double:'double', boolean:'bool', bool:'bool', datetime:'string', void:'void' };
 function _mapType(raw){ const m=String(raw||'int').match(/inst_ref<\s*(\w+)\s*>/); return m?`${m[1]}_t*`:(_TYPE_MAP[String(raw||'int').toLowerCase()]||raw); }
+function _sanitizeCIdent(raw, fallback='ref'){
+  const s = String(raw||'').trim().replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  if(!s) return fallback;
+  return /^[0-9]/.test(s) ? `_${s}` : s;
+}
+function _formatMult(m){
+  if(!m) return '1';
+  const map = { '0_one':'0..1', '0..1':'0..1', '1_star':'1..*', '1..*':'1..*', '0_star':'0..*', '0..*':'0..*', '*':'0..*', '1':'1', 'one':'1', 'many':'0..*' };
+  return map[String(m).trim().toLowerCase()] || String(m).trim();
+}
 function _parseOps(rawOps){
   const out=[];
   for(const s0 of (rawOps||[])){
     if(typeof s0==='object' && s0!==null){
+      const opName = s0.name || s0.operation_name || s0.op_name || 'op';
+      const rawRet = s0.return_type || s0.data_type || s0.returnType || 'void';
+      const rawParams = Array.isArray(s0.parameters) ? s0.parameters : (Array.isArray(s0.params) ? s0.params : []);
+      const normParams = rawParams.map((p, idx) => {
+        if(typeof p === 'string'){
+          const t = p.trim();
+          if(t.includes(':')){
+            const [pn, pt] = t.split(':').map(x => x.trim());
+            return { name: _sanitizeCIdent(pn, `p${idx+1}`), type: _mapType(pt), raw_type: pt };
+          }
+          return { name: _sanitizeCIdent(t, `p${idx+1}`), type: 'string', raw_type: 'string' };
+        }
+        if(typeof p === 'object' && p !== null){
+          const pn = p.name || p.parameter_name || p.param_name || `p${idx+1}`;
+          const pt = p.type || p.data_type || 'int';
+          return { name: _sanitizeCIdent(pn, `p${idx+1}`), type: _mapType(pt), raw_type: pt };
+        }
+        return { name: `p${idx+1}`, type: 'int', raw_type: 'int' };
+      });
       out.push({
-        name: s0.name||'op',
-        return_type: s0.return_type||'void',
-        parameters: Array.isArray(s0.parameters)?s0.parameters:(Array.isArray(s0.params)?s0.params:[]),
-        visibility: s0.visibility||'public',
-        body: s0.body||''
+        name: _sanitizeCIdent(opName, 'op'),
+        return_type: _mapType(rawRet),
+        raw_return_type: rawRet,
+        parameters: normParams,
+        visibility: s0.visibility || 'public',
+        body: s0.body || s0.action || ''
       });
       continue;
     }
     const s=String(s0).trim();
-    const m=s.match(/(\w+)\s*\((.*?)\)\s*(?::\s*(\w+))?$/);
-    if(!m){ out.push({name:s, return_type:'void', parameters:[]}); continue; }
+    const m=s.match(/(\w+)\s*\((.*?)\)\s*(?::\s*([\w<>]+))?$/);
+    if(!m){ out.push({name:_sanitizeCIdent(s,'op'), return_type:'void', raw_return_type:'void', parameters:[]}); continue; }
     const [,name,paramsStr,ret]=m;
     const params=[];
     if(paramsStr.trim()){
       for(const p of paramsStr.split(',')){
         const t=p.trim(); if(!t) continue;
-        if(t.includes(':')){ const [pn,pt]=t.split(':').map(x=>x.trim()); params.push({name:pn,type:_mapType(pt)}); }
-        else params.push({name:t,type:'string'});
+        if(t.includes(':')){
+          const [pn,pt]=t.split(':').map(x=>x.trim());
+          params.push({name:_sanitizeCIdent(pn,'arg'),type:_mapType(pt),raw_type:pt});
+        } else {
+          params.push({name:_sanitizeCIdent(t,'arg'),type:'string',raw_type:'string'});
+        }
       }
     }
-    out.push({name, return_type: ret||'void', parameters: params});
+    out.push({name, return_type: _mapType(ret||'void'), raw_return_type: ret||'void', parameters: params});
   }
   return out;
 }
 
+function _extractTransitionsFromSTT(stt, rawStates, evById, evByName){
+  const transitions = [];
+  if(!stt) return transitions;
+  const stateById = {};
+  (rawStates||[]).forEach((s, idx) => {
+    const sid = String(s.state_id !== undefined ? s.state_id : idx);
+    stateById[sid] = s.state_name || s.name || `S${idx}`;
+  });
+  const resolveState = (st) => {
+    if(!st) return '';
+    const s = String(st).trim();
+    if(['cannot_happen','event_ignored','cant_happen','ignored','none','-','null'].includes(s.toLowerCase())) return '';
+    return stateById[s] || s;
+  };
+  const resolveEvent = (evKey) => {
+    if(!evKey) return { name: '', id: '' };
+    const k = String(evKey).trim();
+    if(evById[k]) return { name: evById[k].event_name || evById[k].name || k, id: evById[k].event_id || k };
+    if(evByName[k]) return { name: k, id: evByName[k].event_id || '' };
+    const m = k.match(/^([A-Za-z]+\d+)\s*:\s*(\w+)$/);
+    if(m) return { name: m[2], id: m[1] };
+    return { name: k, id: '' };
+  };
+
+  if(Array.isArray(stt)){
+    for(const row of stt){
+      if(!row || typeof row !== 'object') continue;
+      const src = resolveState(row.current_state || row.from_state || row.from || row.state_name || row.state);
+      if(!src) continue;
+      // Format A: flat transition entry { current_state, event_id/event, next_state }
+      if(row.next_state !== undefined || row.to_state !== undefined || row.to !== undefined){
+        const dst = resolveState(row.next_state || row.to_state || row.to);
+        const evRaw = row.event_id || row.event_name || row.event;
+        if(src && dst && evRaw){
+          const evInfo = resolveEvent(evRaw);
+          const evName = row.event_name || evInfo.name || String(evRaw);
+          const evId = row.event_id || evInfo.id || '';
+          transitions.push({
+            from: src,
+            to: dst,
+            event: evName,
+            event_id: evId,
+            label: evId ? `${evName} (${evId})` : evName
+          });
+        }
+      }
+      // Format B: row with nested transitions object { current_state: "Idle", transitions: { "VM1": "CheckStock" } }
+      const nested = row.transitions || row.cells || row.events;
+      if(nested && typeof nested === 'object' && !Array.isArray(nested)){
+        for(const [evKey, targetVal] of Object.entries(nested)){
+          const dst = resolveState(typeof targetVal === 'object' && targetVal !== null ? (targetVal.next_state || targetVal.to) : targetVal);
+          if(src && dst){
+            const evInfo = resolveEvent(evKey);
+            transitions.push({
+              from: src,
+              to: dst,
+              event: evInfo.name,
+              event_id: evInfo.id,
+              label: evInfo.id ? `${evInfo.name} (${evInfo.id})` : evInfo.name
+            });
+          }
+        }
+      }
+    }
+  } else if(typeof stt === 'object'){
+    // Format C: Object keyed by state name { "Idle": { "VM1": "CheckStock" } }
+    for(const [stateKey, rowObj] of Object.entries(stt)){
+      const src = resolveState(stateKey);
+      if(!src || !rowObj || typeof rowObj !== 'object') continue;
+      for(const [evKey, targetVal] of Object.entries(rowObj)){
+        const dst = resolveState(typeof targetVal === 'object' && targetVal !== null ? (targetVal.next_state || targetVal.to) : targetVal);
+        if(src && dst){
+          const evInfo = resolveEvent(evKey);
+          transitions.push({
+            from: src,
+            to: dst,
+            event: evInfo.name,
+            event_id: evInfo.id,
+            label: evInfo.id ? `${evInfo.name} (${evInfo.id})` : evInfo.name
+          });
+        }
+      }
+    }
+  }
+  return transitions;
+}
+
 function _normalizeXtuml(data){
-  const isXtuml = Array.isArray(data.model) && data.model.some(x=>x && x.type==='class');
-  if(!isXtuml) return data;
+  const isXtuml = Array.isArray(data.model) && data.model.some(x=>x && (x.type==='class' || x.type==='enumeration' || x.class_name));
+  if(!isXtuml){
+    if(Array.isArray(data.enumerations) === false) data.enumerations = [];
+    return data;
+  }
   const idToName={};
-  for(const e of data.model) if(e.type==='class'&&e.class_id) idToName[String(e.class_id)]=e.class_name;
+  const enumerations=[];
+  for(const e of data.model){
+    if(!e) continue;
+    if((e.type==='class' || e.class_name) && e.class_id) idToName[String(e.class_id)]=e.class_name || e.name;
+    if(e.type==='enumeration' || e.type==='enum' || e.data_type==='enumeration'){
+      enumerations.push({
+        name: e.enum_name || e.name || e.class_name || 'Enum',
+        values: e.values || e.enumerators || e.literals || (e.attributes||[]).map(a=>a.attribute_name||a.name) || []
+      });
+    }
+  }
+  for(const en of (data.enumerations || data.data_types || [])){
+    if(en && (en.values || en.enumerators || en.literals)){
+      const ename = en.enum_name || en.name || 'Enum';
+      if(!enumerations.some(x => x.name === ename)){
+        enumerations.push({
+          name: ename,
+          values: en.values || en.enumerators || en.literals || []
+        });
+      }
+    }
+  }
+
   const eventsByClass={};
-  for(const ev of (data.events||[])) (eventsByClass[String(ev.class_id)]||(eventsByClass[String(ev.class_id)]=[])).push(ev);
+  const globalEvById={};
+  const globalEvByName={};
+  for(const ev of (data.events||[])){
+    const cid = String(ev.class_id||'2');
+    (eventsByClass[cid]||(eventsByClass[cid]=[])).push(ev);
+    if(ev.event_id) globalEvById[String(ev.event_id)] = ev;
+    if(ev.event_name) globalEvByName[String(ev.event_name)] = ev;
+  }
+
   const classes=[];
   for(const entry of data.model){
-    if(entry.type!=='class') continue;
+    if(!entry || entry.type==='enumeration' || entry.type==='enum') continue;
+    if(entry.type && entry.type!=='class' && entry.type!=='association_class' && entry.type!=='imported_class') continue;
     const cid=String(entry.class_id||'');
-    const cname=entry.class_name||`Class${cid}`;
+    const cname=entry.class_name||entry.name||`Class${cid}`;
+    if(cid) idToName[cid]=cname;
     const attrs=[];
     for(const a of (entry.attributes||[])){
-      const aname=a.attribute_name||a.name||'unnamed';
+      const aname=_sanitizeCIdent(a.attribute_name||a.name||'unnamed','unnamed');
       const raw=a.data_type||a.type||'string';
       const ctype=_mapType(raw);
+      const isRef = a.attribute_type==='referential_attribute' || Boolean(a.is_referential) || /^inst_ref\s*</i.test(String(raw));
       attrs.push({
         name:aname,
         type:ctype,
+        raw_type:raw,
         visibility:a.visibility||'private',
         default:a.default_value!==undefined?a.default_value:a.default,
-        is_id:a.attribute_type==='naming_attribute'||Boolean(a.is_id)
+        is_id:a.attribute_type==='naming_attribute'||Boolean(a.is_id),
+        is_referential:isRef,
+        relationship_id:a.relationship_id||null
       });
     }
     const ops=_parseOps(entry.operations||[]);
     let sm=null;
     const rawStates=entry.states||[];
-    if(rawStates.length || eventsByClass[cid]){
+    const classStt = entry.state_transition_table || (cname === 'VendingMachine' || cid === '2' ? data.state_transition_table : null);
+    if(rawStates.length || eventsByClass[cid] || classStt){
       const evMap={}; let eid=1;
       for(const ev of (eventsByClass[cid]||[])){
-        const ename=ev.event_name;
-        const rawId=(ev.event_id||'').replace(/\D/g,'');
+        const ename=ev.event_name||ev.name;
+        const rawCode = ev.event_id || `EV${eid}`;
+        const rawId=String(rawCode).replace(/\D/g,'');
         const plist=[];
-        for(const p of (ev.parameters||[])) if(p.includes(':')){ const[pn,pt]=p.split(':').map(x=>x.trim()); plist.push({name:pn,type:(_TYPE_MAP[pt.toLowerCase()]||pt)}); }
-        evMap[ename]={name:ename,id: rawId?parseInt(rawId,10):eid, parameters: plist}; eid++;
+        for(const p of (ev.parameters||[])){
+          if(typeof p === 'string' && p.includes(':')){
+            const[pn,pt]=p.split(':').map(x=>x.trim());
+            plist.push({name:_sanitizeCIdent(pn,'p'),type:(_TYPE_MAP[pt.toLowerCase()]||pt),raw_type:pt});
+          } else if(typeof p === 'object' && p !== null){
+            const pn = p.name || p.parameter_name || 'p';
+            const pt = p.type || p.data_type || 'string';
+            plist.push({name:_sanitizeCIdent(pn,'p'),type:(_TYPE_MAP[pt.toLowerCase()]||pt),raw_type:pt});
+          }
+        }
+        evMap[ename]={name:ename,event_code:rawCode,id: rawId?parseInt(rawId,10):eid, parameters: plist}; eid++;
       }
-      for(const s of rawStates) for(const en of (s.state_event||[])) if(!evMap[en]){ evMap[en]={name:en,id:eid}; eid++; }
-      const states=rawStates.map((s,idx)=>({name:s.state_name||`S${idx}`,id:parseInt(s.state_id,10)||idx,is_initial:idx===0,entry:s.action}));
-      const transitions=[];
-      for(const s of rawStates){ const src=s.state_name, dst=s.next_state; for(const en of (s.state_event||[])) if(src&&dst&&en) transitions.push({from:src,to:dst,event:en}); }
-      sm={events:Object.values(evMap),states,transitions};
+      const states=rawStates.map((s,idx)=>({
+        name:s.state_name||s.name||`S${idx}`,
+        id:parseInt(s.state_id!==undefined?s.state_id:idx,10)||idx,
+        is_initial:s.is_initial!==undefined ? Boolean(s.is_initial) : idx===0,
+        entry:s.action||s.entry_action||s.entry||''
+      }));
+
+      let transitions=[];
+      if(classStt){
+        // Gunakan state_transition_table sebagai satu-satunya sumber transisi!
+        transitions = _extractTransitionsFromSTT(classStt, rawStates, globalEvById, globalEvByName);
+        for(const tr of transitions){
+          if(!evMap[tr.event]){
+            const rawId = String(tr.event_id||'').replace(/\D/g,'');
+            evMap[tr.event] = { name: tr.event, event_code: tr.event_id || `EV${eid}`, id: rawId ? parseInt(rawId,10) : eid, parameters: [] };
+            eid++;
+          }
+        }
+      } else {
+        for(const s of rawStates) for(const en of (s.state_event||[])) if(!evMap[en]){ evMap[en]={name:en,event_code:`EV${eid}`,id:eid}; eid++; }
+        for(const s of rawStates){
+          const src=s.state_name, dst=s.next_state;
+          for(const en of (s.state_event||[])){
+            if(src&&dst&&en){
+              const evObj = evMap[en];
+              const code = evObj && evObj.event_code ? evObj.event_code : '';
+              transitions.push({from:src,to:dst,event:en,event_id:code,label:code?`${en} (${code})`:en});
+            }
+          }
+        }
+      }
+      sm={events:Object.values(evMap),states,transitions,used_stt:Boolean(classStt)};
     }
-    const cls={name:cname,key_letters:entry.KL||cname.slice(0,3).toUpperCase(),attributes:attrs,operations:ops};
+    const cls={
+      class_id:cid,
+      name:cname,
+      key_letters:entry.KL||entry.key_letters||cname.slice(0,3).toUpperCase(),
+      attributes:attrs,
+      operations:ops,
+      is_external:Boolean(entry.is_external)
+    };
     if(sm&&sm.states.length){ cls.is_active=true; cls.state_machine=sm; }
-    if(entry.is_external) cls.is_external=true;
     classes.push(cls);
   }
+
   const rels=[];
   for(const r of (data.relationships||[])){
+    if(!r) continue;
+    const rname = r.rel_id || r.name || `R${rels.length+1}`;
+    const rawType = String(r.type || 'association').toLowerCase();
+
+    // Handle generalization / supertype-subtype
+    if(rawType === 'generalization' || rawType === 'supertype' || rawType === 'subtype_supertype' || r.supertype_class_id || r.supertype){
+      const supRaw = r.supertype_class_id || r.supertype || r.to_class || r.target;
+      const supName = idToName[String(supRaw)] || String(supRaw||'');
+      const subList = r.subtype_class_ids || r.subtypes || [r.from_class || r.source];
+      for(const subRaw of (Array.isArray(subList) ? subList : [subList])){
+        const subName = idToName[String(subRaw)] || String(subRaw||'');
+        if(supName && subName){
+          rels.push({
+            name: rname,
+            type: 'generalization',
+            source: subName,
+            target: supName,
+            source_multiplicity: '1',
+            target_multiplicity: '1',
+            source_role: r.from_class_role || r.source_role || 'is_a',
+            target_role: r.to_class_role || r.target_role || 'supertype'
+          });
+        }
+      }
+      continue;
+    }
+
     const src=idToName[String(r.from_class)]||String(r.from_class||r.source||'');
     const tgt=idToName[String(r.to_class)]||String(r.to_class||r.target||'');
     if(!src||!tgt) continue;
-    let rtype=r.type||'association'; if(rtype==='binary') rtype='association';
-    rels.push({name:r.rel_id||r.name||'',type:rtype,source:src,target:tgt,source_role:r.from_class_role||r.source_role,target_role:r.to_class_role||r.target_role});
+    const assocClsRaw = r.association_class || r.assoc_class || r.associative_class || r.association_class_id || r.link_class || r.third_class;
+    const assocClsName = assocClsRaw ? (idToName[String(assocClsRaw)] || String(assocClsRaw)) : null;
+    let rtype = rawType;
+    if(rtype === 'binary') rtype = 'association';
+    if(assocClsName) rtype = 'association_class';
+
+    rels.push({
+      name: rname,
+      type: rtype,
+      source: src,
+      target: tgt,
+      source_multiplicity: _formatMult(r.from_class_multiplicity || r.source_multiplicity || '1'),
+      target_multiplicity: _formatMult(r.to_class_multiplicity || r.target_multiplicity || '1'),
+      raw_source_multiplicity: r.from_class_multiplicity || r.source_multiplicity || '1',
+      raw_target_multiplicity: r.to_class_multiplicity || r.target_multiplicity || '1',
+      source_role: r.from_class_role || r.source_role || '',
+      target_role: r.to_class_role || r.target_role || '',
+      association_class: assocClsName,
+      is_reflexive: src === tgt
+    });
   }
-  return {name:data.sub_name||data.sub_id||data.name||'UnnamedModel',classes,relationships:rels};
+  return {
+    name:data.sub_name||data.sub_id||data.name||'UnnamedModel',
+    classes,
+    relationships:rels,
+    enumerations,
+    events:data.events||[],
+    state_transition_table:data.state_transition_table||null
+  };
 }
 
 /**
@@ -98,7 +355,7 @@ function buildSemanticInspection(model) {
   const astEntities = [];
 
   (model.classes || []).forEach(cls => {
-    const attrs = cls.attributes || [];
+    const attrs = (cls.attributes || []).filter(a => !a.is_referential);
     const ops = cls.operations || [];
 
     astEntities.push({
@@ -153,10 +410,11 @@ function buildSemanticInspection(model) {
 
   (model.relationships || []).forEach((r, idx) => {
     const rname = r.name || `R${idx + 1}`;
+    const roleIdent = _sanitizeCIdent(r.target_role || r.target.toLowerCase(), 'ref');
     astEntities.push({
       category: 'RELATIONSHIP',
       entity: `Relationship(name="${rname}", source="${r.source}", target="${r.target}")`,
-      details: `Struct pointer: ${r.target}* ${r.target_role || r.target.toLowerCase()};`
+      details: `Struct pointer: ${r.target}* ${roleIdent};`
     });
   });
 
@@ -165,7 +423,6 @@ function buildSemanticInspection(model) {
 
 /**
  * Parse XML / XMI Diagram (OMG UML XMI 2.x maupun Simple UML XML) ke Canonical xtUML JSON
- * Bekerja di Browser maupun Node.js (tanpa ketergantungan eksternal).
  */
 function parseXmlOrXmiToModel(xmlText) {
   const raw = String(xmlText || '').trim();
@@ -173,14 +430,13 @@ function parseXmlOrXmiToModel(xmlText) {
     throw new Error('Input XML/XMI kosong atau tidak diawali tag XML (<...>)');
   }
 
-  // Validasi keseimbangan tag dasar
   const cleanNoDecl = raw.replace(/<\?xml[\s\S]*?\?>/gi, '').replace(/<!--[\s\S]*?-->/g, '').trim();
   if (!cleanNoDecl.includes('>')) {
     throw new Error('Sintaks XML/XMI tidak valid');
   }
 
   const getAttr = (attrStr, name) => {
-    const prefix = name.includes(':') ? '(?:^|\\s)' : '(?:^|\\s)';
+    const prefix = '(?:^|\\s)';
     const re = new RegExp(`${prefix}${name}\\s*=\\s*["']([^"']*)["']`, 'i');
     const m = String(attrStr || '').match(re);
     return m ? m[1].trim() : '';
@@ -196,7 +452,6 @@ function parseXmlOrXmiToModel(xmlText) {
   const relationships = [];
   const idToClass = {};
 
-  // Match baik <packagedElement xmi:type="uml:Class" ...>...</packagedElement>, <uml:Class ...>...</uml:Class>, atau <class ...>...</class>
   const classBlockRe = /<(?:packagedElement|uml:Class|Class)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:packagedElement|uml:Class|Class)>)/gi;
   let cm;
   while ((cm = classBlockRe.exec(cleanNoDecl)) !== null) {
@@ -204,7 +459,6 @@ function parseXmlOrXmiToModel(xmlText) {
     const innerXml = cm[2] || '';
     const xmiType = getAttr(headerAttrs, 'xmi:type') || getAttr(headerAttrs, 'xsi:type') || getAttr(headerAttrs, 'type');
 
-    // Jika packagedElement tapi bukan uml:Class (misal uml:Association), cek apakah relasi
     if (cm[0].toLowerCase().startsWith('<packagedelement') && xmiType && !xmiType.toLowerCase().endsWith('class')) {
       if (xmiType.toLowerCase().includes('association')) {
         const rname = getAttr(headerAttrs, 'name') || `R${relationships.length + 1}`;
@@ -236,7 +490,6 @@ function parseXmlOrXmiToModel(xmlText) {
     const attributes = [];
     const operations = [];
 
-    // Ekstrak <ownedAttribute .../> atau <attribute .../>
     const attrRe = /<(?:ownedAttribute|uml:Property|attribute|field)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:ownedAttribute|uml:Property|attribute|field)>)/gi;
     let am;
     while ((am = attrRe.exec(innerXml)) !== null) {
@@ -259,12 +512,12 @@ function parseXmlOrXmiToModel(xmlText) {
       attributes.push({
         name: aname,
         type: _mapType(atype),
+        raw_type: atype,
         visibility: vis,
         ...(dval !== undefined && dval !== '' ? { default_value: dval } : {})
       });
     }
 
-    // Ekstrak <ownedOperation ...> atau <operation ...> atau <method ...>
     const opRe = /<(?:ownedOperation|uml:Operation|operation|method)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:ownedOperation|uml:Operation|operation|method)>)/gi;
     let om;
     while ((om = opRe.exec(innerXml)) !== null) {
@@ -290,7 +543,7 @@ function parseXmlOrXmiToModel(xmlText) {
             retType = ptype;
           } else {
             const pname = getAttr(pHeader, 'name') || `arg${params.length + 1}`;
-            params.push({ name: pname, type: _mapType(ptype) });
+            params.push({ name: pname, type: _mapType(ptype), raw_type: ptype });
           }
         }
         const bodyMatch = oInner.match(/<(?:body|oal)>([\s\S]*?)<\/(?:body|oal)>/i);
@@ -300,13 +553,13 @@ function parseXmlOrXmiToModel(xmlText) {
       operations.push({
         name: oname,
         return_type: _mapType(retType),
+        raw_return_type: retType,
         visibility: vis,
         parameters: params,
         ...(body ? { body } : {})
       });
     }
 
-    // Ekstrak opsional <stateMachine> di dalam class
     let stateMachine = undefined;
     const smMatch = innerXml.match(/<(?:stateMachine|state_machine)\b[^>]*>([\s\S]*?)<\/(?:stateMachine|state_machine)>/i);
     if (smMatch) {
@@ -355,7 +608,6 @@ function parseXmlOrXmiToModel(xmlText) {
     classes.push(clsObj);
   }
 
-  // Ekstrak tag <association> atau <relationship> standalone
   const relRe = /<(?:association|relationship|uml:Association)\b([^>]*?)\/?>/gi;
   let rm;
   while ((rm = relRe.exec(cleanNoDecl)) !== null) {
@@ -387,7 +639,8 @@ function parseXmlOrXmiToModel(xmlText) {
   const model = {
     name: modelName,
     classes,
-    relationships
+    relationships,
+    enumerations: []
   };
   const inspection = buildSemanticInspection(model);
   return {
@@ -420,7 +673,7 @@ function modelToXmlXmi(model) {
     lines.push(
       `    <packagedElement xmi:type="uml:Class" xmi:id="cls_${cIdx + 1}" name="${esc(cls.name)}" key_letters="${esc(kl)}" isActive="${Boolean(cls.is_active)}">`
     );
-    (cls.attributes || []).forEach((attr, aIdx) => {
+    (cls.attributes || []).filter(a => !a.is_referential).forEach((attr, aIdx) => {
       const dval = attr.default_value !== undefined ? attr.default_value : attr.default;
       const dAttr = dval !== undefined && dval !== null && dval !== '' ? ` defaultValue="${esc(dval)}"` : '';
       lines.push(
@@ -496,7 +749,16 @@ class UMLToC {
             };
         }catch(error){ return{success:false,error:error.message}; }
     }
-    buildModel(data){ return{ name:data.name||'UnnamedModel', classes:data.classes||[], relationships:data.relationships||[] }; }
+    buildModel(data){
+        return{
+            name:data.name||'UnnamedModel',
+            classes:data.classes||[],
+            relationships:data.relationships||[],
+            enumerations:data.enumerations||[],
+            events:data.events||[],
+            state_transition_table:data.state_transition_table||null
+        };
+    }
     validate(){
         if(!this.model.classes||this.model.classes.length===0) throw new Error('Model must contain at least one class');
         const seenCls=new Set();
@@ -522,7 +784,7 @@ class UMLToC {
             const kl=cls.key_letters||cls.KL||cls.name.slice(0,3).toUpperCase();
             clsLines.push(`    class ${cls.name} {`);
             clsLines.push(`        <<${cls.is_active?'Active Class':'Class'} | KL: ${kl}>>`);
-            (cls.attributes||[]).forEach(a=>clsLines.push(`        -${this.mapType(a.type)} ${a.name}`));
+            (cls.attributes||[]).filter(a=>!a.is_referential).forEach(a=>clsLines.push(`        -${this.mapType(a.type)} ${a.name}`));
             clsLines.push(`        +${cls.name}_init(${cls.name}_t* self) void`);
             (cls.operations||[]).forEach(op=>clsLines.push(`        +${op.name}() ${op.return_type||'void'}`));
             clsLines.push('    }');
@@ -556,12 +818,16 @@ class UMLToC {
     }
     _getOutgoingRels(cls){
         const out=[];
-        const attrNames=new Set((cls.attributes||[]).map(a=>a.name));
+        const attrNames=new Set((cls.attributes||[]).map(a=>_sanitizeCIdent(a.name)));
+        const seenFields=new Set(attrNames);
         (this.model.relationships||[]).forEach((r,idx)=>{
             if(r.source===cls.name && r.target){
-                const rname=r.name||`R${idx+1}`;
-                const field=r.target_role||`${rname}_${r.target.toLowerCase()}`;
-                out.push({rel_name:rname,target_class:r.target,field,already:attrNames.has(field)});
+                const rname=_sanitizeCIdent(r.name||`R${idx+1}`, `R${idx+1}`);
+                const rawField=r.target_role||`${rname}_${r.target.toLowerCase()}`;
+                let field=_sanitizeCIdent(rawField, `${rname}_${r.target.toLowerCase()}`);
+                const already=seenFields.has(field);
+                seenFields.add(field);
+                out.push({rel_name:rname,target_class:r.target,field,already});
             }
         });
         return out;
@@ -589,15 +855,15 @@ class UMLToC {
         if(cls.is_active&&cls.state_machine){
             const sm=cls.state_machine;
             code.push('typedef enum {');
-            sm.states.forEach(s=>code.push(`    ${cls.name.toUpperCase()}_STATE_${s.name.toUpperCase()} = ${s.id},`));
+            sm.states.forEach(s=>code.push(`    ${cls.name.toUpperCase()}_STATE_${_sanitizeCIdent(s.name).toUpperCase()} = ${s.id},`));
             code.push(`} ${cls.name}_State;`); code.push('');
             code.push('typedef enum {');
-            sm.events.forEach(e=>code.push(`    ${cls.name.toUpperCase()}_EVENT_${e.name.toUpperCase()} = ${e.id},`));
+            sm.events.forEach(e=>code.push(`    ${cls.name.toUpperCase()}_EVENT_${_sanitizeCIdent(e.name).toUpperCase()} = ${e.id},`));
             code.push(`} ${cls.name}_Event;`); code.push('');
         }
         code.push(`struct ${cls.name}_s {`);
         code.push('    UML_InstanceHeader_t header;');
-        (cls.attributes||[]).forEach(attr=>{ code.push(`    ${this.mapType(attr.type)} ${attr.name};`); });
+        (cls.attributes||[]).forEach(attr=>{ code.push(`    ${this.mapType(attr.type)} ${_sanitizeCIdent(attr.name)};`); });
         outRels.forEach(r=>{ if(!r.already) code.push(`    ${r.target_class}_t* ${r.field};`); });
         if(cls.is_active&&cls.state_machine) code.push(`    ${cls.name}_State current_state;`);
         code.push('};'); code.push('');
@@ -612,7 +878,7 @@ class UMLToC {
         (cls.operations||[]).forEach(op=>{
             const params=this.formatParams(op.parameters);
             const ret=op.return_type?this.mapType(op.return_type):'void';
-            code.push(`${ret} ${cls.name}_${op.name}(${cls.name}_t* self${params?', '+params:''});`);
+            code.push(`${ret} ${cls.name}_${_sanitizeCIdent(op.name)}(${cls.name}_t* self${params?', '+params:''});`);
         });
         if(cls.is_active&&cls.state_machine){ code.push(''); code.push(`void ${cls.name}_dispatch_event(${cls.name}_t* self, ${cls.name}_Event evt);`); }
         code.push(''); code.push(`#endif /* ${guard} */`);
@@ -632,13 +898,14 @@ class UMLToC {
         (cls.attributes||[]).forEach(attr=>{
             const dval=attr.default!==undefined?attr.default:attr.default_value;
             if(dval===undefined||dval===null||dval==='') return;
-            if(this.mapType(attr.type)==='uml_string_t') code.push(`    uml_string_set(&self->${attr.name}, "${String(dval).replace(/"/g,'\\"')}");`);
-            else code.push(`    self->${attr.name} = ${dval};`);
+            const aname=_sanitizeCIdent(attr.name);
+            if(this.mapType(attr.type)==='uml_string_t') code.push(`    uml_string_set(&self->${aname}, "${String(dval).replace(/"/g,'\\"')}");`);
+            else code.push(`    self->${aname} = ${dval};`);
         });
         outRels.forEach(r=>{ if(!r.already) code.push(`    self->${r.field} = NULL;`); });
         if(cls.is_active&&cls.state_machine){
             const initial=cls.state_machine.states.find(s=>s.is_initial)||cls.state_machine.states[0];
-            if(initial) code.push(`    self->current_state = ${cls.name.toUpperCase()}_STATE_${initial.name.toUpperCase()};`);
+            if(initial) code.push(`    self->current_state = ${cls.name.toUpperCase()}_STATE_${_sanitizeCIdent(initial.name).toUpperCase()};`);
         }
         code.push('}'); code.push('');
         code.push(`${cls.name}_t* ${cls.name}_create(void) {`);
@@ -649,13 +916,14 @@ class UMLToC {
         (cls.attributes||[]).forEach(attr=>{
             const dval=attr.default!==undefined?attr.default:attr.default_value;
             if(dval===undefined||dval===null||dval==='') return;
-            if(this.mapType(attr.type)==='uml_string_t') code.push(`    uml_string_set(&self->${attr.name}, "${String(dval).replace(/"/g,'\\"')}");`);
-            else code.push(`    self->${attr.name} = ${dval};`);
+            const aname=_sanitizeCIdent(attr.name);
+            if(this.mapType(attr.type)==='uml_string_t') code.push(`    uml_string_set(&self->${aname}, "${String(dval).replace(/"/g,'\\"')}");`);
+            else code.push(`    self->${aname} = ${dval};`);
         });
         outRels.forEach(r=>{ if(!r.already) code.push(`    self->${r.field} = NULL;`); });
         if(cls.is_active&&cls.state_machine){
             const initial=cls.state_machine.states.find(s=>s.is_initial)||cls.state_machine.states[0];
-            if(initial) code.push(`    self->current_state = ${cls.name.toUpperCase()}_STATE_${initial.name.toUpperCase()};`);
+            if(initial) code.push(`    self->current_state = ${cls.name.toUpperCase()}_STATE_${_sanitizeCIdent(initial.name).toUpperCase()};`);
         }
         code.push('    return self;'); code.push('}'); code.push('');
         code.push(`void ${cls.name}_destroy(${cls.name}_t* self) {`);
@@ -671,7 +939,7 @@ class UMLToC {
         (cls.operations||[]).forEach(op=>{
             const params=this.formatParams(op.parameters);
             const ret=op.return_type?this.mapType(op.return_type):'void';
-            code.push(`${ret} ${cls.name}_${op.name}(${cls.name}_t* self${params?', '+params:''}) {`);
+            code.push(`${ret} ${cls.name}_${_sanitizeCIdent(op.name)}(${cls.name}_t* self${params?', '+params:''}) {`);
             code.push('    (void)self;');
             let hasRet=false;
             if(op.body){
@@ -695,13 +963,17 @@ class UMLToC {
             code.push('    switch (old_state) {');
             const sm=cls.state_machine;
             sm.states.forEach(state=>{
-                code.push(`        case ${cls.name.toUpperCase()}_STATE_${state.name.toUpperCase()}: {`);
+                code.push(`        case ${cls.name.toUpperCase()}_STATE_${_sanitizeCIdent(state.name).toUpperCase()}: {`);
                 const transitions=sm.transitions.filter(t=>t.from===state.name);
                 if(transitions.length>0){
                     code.push('            switch (evt) {');
+                    const seenEv=new Set();
                     transitions.forEach(trans=>{
-                        code.push(`                case ${cls.name.toUpperCase()}_EVENT_${trans.event.toUpperCase()}: {`);
-                        code.push(`                    new_state = ${cls.name.toUpperCase()}_STATE_${trans.to.toUpperCase()};`);
+                        const evConst = `${cls.name.toUpperCase()}_EVENT_${_sanitizeCIdent(trans.event).toUpperCase()}`;
+                        if(seenEv.has(evConst)) return;
+                        seenEv.add(evConst);
+                        code.push(`                case ${evConst}: {`);
+                        code.push(`                    new_state = ${cls.name.toUpperCase()}_STATE_${_sanitizeCIdent(trans.to).toUpperCase()};`);
                         code.push('                    break;'); code.push('                }');
                     });
                     code.push('                default: break;'); code.push('            }');
@@ -718,7 +990,7 @@ class UMLToC {
         this.model.classes.forEach(cls=>code.push(`#include "${cls.name}.h"`));
         code.push(''); code.push('int main(void) {');
         (this.model.classes||[]).forEach(cls=>{
-            const v=cls.name.toLowerCase();
+            const v=_sanitizeCIdent(cls.name.toLowerCase(),'inst');
             code.push(`    ${cls.name} ${v};`);
             code.push(`    ${cls.name}_init(&${v});`);
         });
@@ -727,21 +999,24 @@ class UMLToC {
     }
     mapType(umlType){
         if(!umlType) return 'int32_t';
-        if(umlType.endsWith('_t*')||umlType.endsWith('*')) return umlType;
+        const s = String(umlType).trim();
+        if(s.endsWith('_t*')||s.endsWith('*')) return s;
         const m={int:'int32_t',integer:'int32_t',bool:'bool',boolean:'bool',string:'uml_string_t',float:'float',real:'float',double:'double',void:'void'};
-        return m[umlType.toLowerCase()]||umlType;
+        return m[s.toLowerCase()]||_sanitizeCIdent(s,'int32_t');
     }
     formatParams(params){
         if(!params||params.length===0) return '';
-        return params.map(p=>`${this.mapType(p.type)} ${p.name}`).join(', ');
+        return params.map((p,i)=>`${this.mapType(p.type||p.data_type||'int')} ${_sanitizeCIdent(p.name||p.parameter_name||p.param_name||`p${i+1}`,`p${i+1}`)}`).join(', ');
     }
 }
 if(typeof module!=='undefined' && module.exports) {
-    module.exports={UMLToC, parseXmlOrXmiToModel, modelToXmlXmi, buildSemanticInspection};
+    module.exports={UMLToC, parseXmlOrXmiToModel, modelToXmlXmi, buildSemanticInspection, _normalizeXtuml, _formatMult};
 }
 if(typeof window!=='undefined') {
     window.UMLToC=UMLToC;
     window.parseXmlOrXmiToModel=parseXmlOrXmiToModel;
     window.modelToXmlXmi=modelToXmlXmi;
     window.buildSemanticInspection=buildSemanticInspection;
+    window._normalizeXtuml=_normalizeXtuml;
+    window._formatMult=_formatMult;
 }

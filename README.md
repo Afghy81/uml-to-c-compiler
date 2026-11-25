@@ -79,7 +79,7 @@ flowchart LR
         B -->|JSON| D[json_loader + _normalizeXtuml]
         C & D --> E[IR Builder + Validator]
     end
-    E --> F[Memory Planner + SM Analyzer]
+    E --> F[Memory Planner + Validate SM]
     F --> G1[Header Emitter]
     F --> G2[Source + FSM Dispatcher Emitter]
     G1 & G2 --> H[output/*.h, *.c, main.c + runtime_c]

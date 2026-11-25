@@ -1,0 +1,59 @@
+digraph "SmartThermalMonitor_ActionDiagrams" {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontname="Consolas", fontsize=10];
+    edge [fontname="Consolas", fontsize=9];
+    subgraph "cluster_Controller_op_cekAmbangBatas" {
+        label="Action Diagram: Operation Controller::cekAmbangBatas()";
+        "Controller_op_cekAmbangBatas_START" [label="START", shape=oval];
+        "Controller_op_cekAmbangBatas_N1" [label="[assign]\nself.alarm_aktif = (suhu_ukur > self.batas_suhu)", shape=box];
+        "Controller_op_cekAmbangBatas_START" -> "Controller_op_cekAmbangBatas_N1";
+        "Controller_op_cekAmbangBatas_N2" [label="[return]\nreturn self.alarm_aktif", shape=box];
+        "Controller_op_cekAmbangBatas_N1" -> "Controller_op_cekAmbangBatas_N2";
+        "Controller_op_cekAmbangBatas_END" [label="END", shape=oval];
+        "Controller_op_cekAmbangBatas_N2" -> "Controller_op_cekAmbangBatas_END";
+    }
+    subgraph "cluster_Sensor_op_bacaData" {
+        label="Action Diagram: Operation Sensor::bacaData()";
+        "Sensor_op_bacaData_START" [label="START", shape=oval];
+        "Sensor_op_bacaData_N1" [label="[assign]\nself.suhu = 27.5f", shape=box];
+        "Sensor_op_bacaData_START" -> "Sensor_op_bacaData_N1";
+        "Sensor_op_bacaData_END" [label="END", shape=oval];
+        "Sensor_op_bacaData_N1" -> "Sensor_op_bacaData_END";
+    }
+    subgraph "cluster_Sensor_state_Idle" {
+        label="Action Diagram: State @state_num(1) Sensor::Idle (Entry OAL)";
+        "Sensor_state_Idle_START" [label="START", shape=oval];
+        "Sensor_state_Idle_N1" [label="[assign]\nself.suhu = 0.0f", shape=box];
+        "Sensor_state_Idle_START" -> "Sensor_state_Idle_N1";
+        "Sensor_state_Idle_END" [label="END", shape=oval];
+        "Sensor_state_Idle_N1" -> "Sensor_state_Idle_END";
+    }
+    subgraph "cluster_Sensor_state_Sampling" {
+        label="Action Diagram: State @state_num(2) Sensor::Sampling (Entry OAL)";
+        "Sensor_state_Sampling_START" [label="START", shape=oval];
+        "Sensor_state_Sampling_N1" [label="[call]\nself.bacaData()", shape=box];
+        "Sensor_state_Sampling_START" -> "Sensor_state_Sampling_N1";
+        "Sensor_state_Sampling_N2" [label="[select_one]\nselect one ctrl related by self->CTL[R1]", shape=box];
+        "Sensor_state_Sampling_N1" -> "Sensor_state_Sampling_N2";
+        "Sensor_state_Sampling_N3" [label="[if]\nif (not_empty ctrl)", shape=diamond];
+        "Sensor_state_Sampling_N2" -> "Sensor_state_Sampling_N3";
+        "Sensor_state_Sampling_N4" [label="[if]\nif (self.suhu > ctrl.batas_suhu)", shape=diamond];
+        "Sensor_state_Sampling_N3" -> "Sensor_state_Sampling_N4";
+        "Sensor_state_Sampling_N5" [label="[generate]\ngenerate SEN3:Overheat() to self", shape=box];
+        "Sensor_state_Sampling_N4" -> "Sensor_state_Sampling_N5";
+        "Sensor_state_Sampling_END" [label="END", shape=oval];
+        "Sensor_state_Sampling_N5" -> "Sensor_state_Sampling_END";
+    }
+    subgraph "cluster_Sensor_state_OverheatAlert" {
+        label="Action Diagram: State @state_num(3) Sensor::OverheatAlert (Entry OAL)";
+        "Sensor_state_OverheatAlert_START" [label="START", shape=oval];
+        "Sensor_state_OverheatAlert_N1" [label="[select_one]\nselect one ctrl related by self->CTL[R1]", shape=box];
+        "Sensor_state_OverheatAlert_START" -> "Sensor_state_OverheatAlert_N1";
+        "Sensor_state_OverheatAlert_N2" [label="[if]\nif (not_empty ctrl)", shape=diamond];
+        "Sensor_state_OverheatAlert_N1" -> "Sensor_state_OverheatAlert_N2";
+        "Sensor_state_OverheatAlert_N3" [label="[assign]\nctrl.alarm_aktif = true", shape=box];
+        "Sensor_state_OverheatAlert_N2" -> "Sensor_state_OverheatAlert_N3";
+        "Sensor_state_OverheatAlert_END" [label="END", shape=oval];
+        "Sensor_state_OverheatAlert_N3" -> "Sensor_state_OverheatAlert_END";
+    }
+}

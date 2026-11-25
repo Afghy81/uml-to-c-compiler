@@ -8,48 +8,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* --------------------------------------------------------------------------
- * Konfigurasi Build Mode
- * -------------------------------------------------------------------------- */
 #ifndef UML_DEBUG
 #define UML_DEBUG 1
 #endif
 
-/* --------------------------------------------------------------------------
- * Logging
- * -------------------------------------------------------------------------- */
 #if UML_DEBUG
     #define UML_LOG(fmt, ...) \
         printf("[UML] " fmt "\n", ##__VA_ARGS__)
-    #define UML_LOG_SM(inst_name, inst_id, fmt, ...) \
-        printf("[SM %s:#%u] " fmt "\n", (inst_name), (inst_id), ##__VA_ARGS__)
     #define UML_LOG_ERR(fmt, ...) \
         fprintf(stderr, "[UML ERR] " fmt "\n", ##__VA_ARGS__)
 #else
-    #define UML_LOG(fmt, ...)              ((void)0)
-    #define UML_LOG_SM(inst_name, inst_id, fmt, ...) ((void)0)
-    #define UML_LOG_ERR(fmt, ...)          ((void)0)
+    #define UML_LOG(fmt, ...)     ((void)0)
+    #define UML_LOG_ERR(fmt, ...) ((void)0)
 #endif
 
-/* --------------------------------------------------------------------------
- * Assertion
- * -------------------------------------------------------------------------- */
-#if UML_DEBUG
-    #define UML_ASSERT(cond) \
-        do { \
-            if (!(cond)) { \
-                fprintf(stderr, "[UML ASSERT FAIL] %s:%d: %s\n", \
-                        __FILE__, __LINE__, #cond); \
-                abort(); \
-            } \
-        } while (0)
-#else
-    #define UML_ASSERT(cond) ((void)0)
-#endif
-
-/* --------------------------------------------------------------------------
- * Error Hook (user-overridable)
- * -------------------------------------------------------------------------- */
 #ifndef UML_ERROR_HOOK
 #define UML_ERROR_HOOK(code, msg) \
     UML_LOG_ERR("Error %d: %s", (int)(code), (msg))
